@@ -5,11 +5,10 @@ import json
 import os
 import pandas as pd
 from openpyxl import load_workbook
-import datetime
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Safari/537.36"
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
-
+cafile = 'files/cdsc-com-np-chain.pem'
 
 class MeroShare:
     def __init__(
@@ -18,7 +17,9 @@ class MeroShare:
             dpid: int = None,
             username: int = None,
             password: str = None,
-            client_id: str = None
+            client_id: str = None,
+            crn: str = None,
+            pin: int = None
     ):
 
         self.__name = name
@@ -31,13 +32,17 @@ class MeroShare:
         self.__capital_id = self.get_capital_id()
         self.__dmat = "130" + self.__dpid + self.__username
         self.client_id = client_id
+        self.__crn = crn
+        self.__pin = pin
+        self.__applicable_issues = None
+        self.__account = None
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), reraise=True)
+
     def get_capital_id(self):
-        if os.path.exists('capitals.json'):
+        if os.path.exists('files/capitals.json'):
             try:
                 return \
-                    [response['id'] for response in json.load(open('capitals.json')) if
+                    [response['id'] for response in json.load(open('files/capitals.json')) if
                      response['code'] == self.__dpid][0]
             except Exception:
                 print('Could not find capital id cache \n Updating cache and Retrying...')
@@ -58,8 +63,8 @@ class MeroShare:
             sess.headers.update(headers)
 
             try:
-                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/").json()
-                with open("capitals.json", "w") as cap_file:
+                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/", verify=cafile).json()
+                with open("files/capitals.json", "w") as cap_file:
                     json.dump(cap_list, cap_file)
 
                 return [response['id'] for response in cap_list if response['code'] == self.__dpid][0]
@@ -105,15 +110,14 @@ class MeroShare:
                 }
                 sess.headers.update(headers)
                 try:
-                    sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/")
+                    sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/", verify=cafile)
                     login_req = sess.post(
-                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data)
-                                                  
-
+                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data, verify=cafile)
+                    self.status = login_req.json()['message']
                     if login_req.status_code == 200:
                         self.__auth_token = login_req.headers.get("Authorization")
-                        logging.info(f"Logged in successfully!  Account: {self.__name}!")
-                        print(login_req.json()['message'])
+                        
+                        logging.info(f"{self.status}  Account: {self.__name}!")
                     else:
                         self.status = f'Login Failed! {login_req.status_code}'
                         logging.warning(f"{self.status} Account: {self.__name}")
@@ -133,97 +137,48 @@ class MeroShare:
 
         return True
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True)
-    def get_share_list(self):
-        try:
-            with self.__session as sess:
-                headers = {
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Authorization": self.__auth_token,
-                    "Connection": "keep-alive",
-                    "Origin": "https://meroshare.cdsc.com.np",
-                    "Referer": "https://meroshare.cdsc.com.np/",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-site",
-                    "Sec-GPC": "1",
-                    "User-Agent": USER_AGENT,
-                }
-                sess.headers.update(headers)
-                data = json.dumps(
-                    {
-                        "sortBy": "CCY_SHORT_NAME",
-                        "demat": [self.__dmat],
-                        "clientCode": self.__dpid,
-                        "page": 1,
-                        "size": 200,
-                        "sortAsc": "true"
-                    }
-                )
-                try:
-                    details_json = sess.post("https://webbackend.cdsc.com.np/api/meroShareView/myShare/", data=data).json()
 
-                    pd_list = pd.DataFrame(columns=['Client ID', 'Name', 'DMAT No', 'Script', 'Current Balance', 'Free Balance'])
-                    for item in details_json.get("meroShareDematShare"):
-                        logging.info(
-                            f'Script: {item.get("script")}, CurrentBalance: {item.get("currentBalance")}, for account: {self.__name}'
-                        )
-                        
-                        data = [self.client_id] + [self.__name] + [self.__dmat] + [item['script']] + [item['currentBalance']] + [item['freeBalance']]
-                        pd_list.loc[len(pd_list)] = data
-                        
-                    return pd_list
-                except:
-                    print('Share list Connection Refused')
-                    self.status = 'Share list Connection Refused!'
-
-        except Exception as error:
-            logging.info(error)
-            logging.error(
-                f"Details request failed!!"
-            )
-
-
-def check(sheet, full_list, client_type):
+def application_list(sheet, full_list, client_type):
     for details in sheet.iter_rows(min_row=2,
                                    min_col=1,
                                    values_only=True):
-        if str(details[2]).upper()=='NO':
+        if str(details[2]).upper()=='NO' and str(details[3]).upper()=='NO':
             continue
 
         login_info = {"name": details[1],
                       "username": details[4].replace(" ", ""),
                       "password": details[6],
                       "dpid": int(details[5]) - 13000000,
-                      "client_id": client_type + str(details[0])}
+                      "client_id": client_type + str(details[0]),
+                      "crn": details[7],
+                      "pin": details[8]}
+
         ms = MeroShare(**login_info)
         ms.login()
-        if ms.status is None:
-            full_list = pd.concat([full_list, ms.get_share_list()])
-            if ms.status is not None:
-                data = [client_type + str(details[0])] + [details[1]] + [str(details[5]) + str(details[4].replace(' ', ''))] + [ms.status] + [0, 0]
-                full_list.loc[len(full_list)] = data
-        else:
-            data = [client_type + str(details[0])] + [details[1]] + [str(details[5])+str(details[4].replace(' ',''))] + [ms.status] + [0, 0]
-            full_list.loc[len(full_list)] = data
+
+        data = [ms.client_id] + [details[1]] + [str(details[5]) + str(details[4].replace(" ",""))] + [ms.status]
+        full_list.loc[len(full_list)] = data
+
+        print('\n')
 
     return (full_list)
 
 
-def check_share():
-    full_list = pd.DataFrame(columns=['Client ID', 'Name', 'DMAT No', 'Script', 'Current Balance', 'Free Balance'])
+def  read_excel():
+    full_list = pd.DataFrame(columns=['Client ID', 'Name', 'Demat', 'Status'])
 
     book = load_workbook(filename='MeroShare Login Details.xlsx', data_only=True)
 
-    full_list = check(book['PMS List'], full_list, 'PMS ')
-    full_list = check(book['Investment'], full_list, 'Inv ')
-    full_list = check(book['Others'], full_list, 'Others ')
-
+    full_list = application_list(book['List'], full_list, '')
     
     print(full_list)
-    full_list.to_excel(f'MeroShare - Share List - {datetime.datetime.now().strftime("%d-%b-%Y")}.xlsx', index=False)
+    full_list.to_excel(f'MeroShare Account Status.xlsx', index=False)
+
+
+def start():
+    read_excel()
+    input('Press Enter to Continue....')
 
 
 if __name__ == '__main__':
-    check_share()
+    start()

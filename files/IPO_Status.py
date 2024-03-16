@@ -9,7 +9,7 @@ import time
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Safari/537.36"
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
-
+cafile = 'files/cdsc-com-np-chain.pem'
 
 class MeroShare:
     def __init__(
@@ -40,10 +40,10 @@ class MeroShare:
 
 
     def get_capital_id(self):
-        if os.path.exists('capitals.json'):
+        if os.path.exists('files/capitals.json'):
             try:
                 return \
-                    [response['id'] for response in json.load(open('capitals.json')) if
+                    [response['id'] for response in json.load(open('files/capitals.json')) if
                      response['code'] == self.__dpid][0]
             except Exception:
                 print('Could not find capital id cache \n Updating cache and Retrying...')
@@ -64,8 +64,8 @@ class MeroShare:
             sess.headers.update(headers)
 
             try:
-                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/").json()
-                with open("capitals.json", "w") as cap_file:
+                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/", verify=cafile).json()
+                with open("files/capitals.json", "w") as cap_file:
                     json.dump(cap_list, cap_file)
 
                 return [response['id'] for response in cap_list if response['code'] == self.__dpid][0]
@@ -111,9 +111,9 @@ class MeroShare:
                 }
                 sess.headers.update(headers)
                 try:
-                    sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/")
+                    sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/", verify=cafile)
                     login_req = sess.post(
-                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data)
+                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data, verify=cafile)
 
                     if login_req.status_code == 200:
                         self.__auth_token = login_req.headers.get("Authorization")
@@ -196,7 +196,7 @@ class MeroShare:
                 sess.headers.update(headers)
                 issue_req = sess.post(
                     "https://webbackend.cdsc.com.np/api/meroShare/companyShare/applicableIssue/",
-                    data=data,
+                    data=data, verify=cafile
                 )
                 assert issue_req.status_code == 200, "Applicable issues request failed!"
 
@@ -265,7 +265,7 @@ class MeroShare:
                     try:
                         recent_applied_req1 = sess.post(
                                             "https://webbackend.cdsc.com.np/api/meroShare/applicantForm/active/search/",
-                                            data=data,)
+                                            data=data, verify=cafile)
                         recent_applied_req = recent_applied_req1.json()['object']
                         assert recent_applied_req1.status_code == 200, "Application request failed!"
                     except:
@@ -311,7 +311,7 @@ class MeroShare:
                 for i in range(tries):
                     try:
                         details_req1 = sess.get(
-                            f"https://webbackend.cdsc.com.np/api/meroShare/applicantForm/report/detail/{target_issue['applicantFormId']}",
+                            f"https://webbackend.cdsc.com.np/api/meroShare/applicantForm/report/detail/{target_issue['applicantFormId']}", verify=cafile
                             )
                         details_req = details_req1.json()
                         self.status = details_req['statusName']
@@ -367,9 +367,7 @@ def  read_excel(Script):
 
     book = load_workbook(filename='MeroShare Login Details.xlsx', data_only=True)
 
-    full_list = application_list(book['PMS List'], full_list, 'PMS ', Script)
-    full_list = application_list(book['Investment'], full_list, 'Inv ', Script)
-    full_list = application_list(book['Others'], full_list, 'Others ', Script)
+    full_list = application_list(book['List'], full_list, '', Script)
 
     print(full_list)
     full_list.to_excel(f'Application Status for {Script}.xlsx', index=False)

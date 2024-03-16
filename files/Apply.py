@@ -9,6 +9,7 @@ import time
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Safari/537.36"
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
+cafile = 'files/cdsc-com-np-chain.pem'
 
 
 class MeroShare:
@@ -42,10 +43,10 @@ class MeroShare:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), reraise=True)
     def get_capital_id(self):
-        if os.path.exists('capitals.json'):
+        if os.path.exists('files/capitals.json'):
             try:
                 return \
-                    [response['id'] for response in json.load(open('capitals.json')) if
+                    [response['id'] for response in json.load(open('files/capitals.json')) if
                      response['code'] == self.__dpid][0]
             except Exception:
                 print('Could not find capital id cache \n Updating cache and Retrying...')
@@ -67,9 +68,9 @@ class MeroShare:
             sess.headers.update(headers)
 
             try:
-                sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/")
-                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/").json()
-                with open("capitals.json", "w") as cap_file:
+                sess.options("https://webbackend.cdsc.com.np/api/meroShare/auth/", verify=cafile)
+                cap_list = sess.get("https://webbackend.cdsc.com.np/api/meroShare/capital/", verify=cafile).json()
+                with open("files/capitals.json", "w") as cap_file:
                     json.dump(cap_list, cap_file)
 
                 return [response['id'] for response in cap_list if response['code'] == self.__dpid][0]
@@ -117,7 +118,7 @@ class MeroShare:
                 sess.headers.update(headers)
                 try:
                     login_req = sess.post(
-                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data)
+                        "https://webbackend.cdsc.com.np/api/meroShare/auth/", data=data, verify=cafile)
 
                     if login_req.status_code == 200:
                         self.__auth_token = login_req.headers.get("Authorization")
@@ -204,7 +205,7 @@ class MeroShare:
                     try:
                         issue_req = sess.post(
                             "https://webbackend.cdsc.com.np/api/meroShare/companyShare/applicableIssue/",
-                            data=data)
+                            data=data, verify=cafile)
                         assert issue_req.status_code == 200, "Applicable issues request failed!"
                     except Exception as error:
                         if i < tries - 1:
@@ -267,7 +268,7 @@ class MeroShare:
                 }
 
                 sess.headers.update(headers)
-                bank_req = sess.get("https://webbackend.cdsc.com.np/api/meroShare/bank/").json()
+                bank_req = sess.get("https://webbackend.cdsc.com.np/api/meroShare/bank/", verify=cafile).json()
 
                 bank_id = None
                 for bank_ in bank_req:
@@ -280,25 +281,28 @@ class MeroShare:
                     return 0
 
                 bank_specific_req = sess.get(
-                    f"https://webbackend.cdsc.com.np/api/meroShare/bank/{bank_id}"
+                    f"https://webbackend.cdsc.com.np/api/meroShare/bank/{bank_id}", verify=cafile
                 )
 
-                bank_specific_response_json = bank_specific_req.json()
+                bank_specific_response_json = bank_specific_req.json()[0]
 
                 branch_id = bank_specific_response_json.get("accountBranchId")
                 account_number = bank_specific_response_json.get("accountNumber")
                 customer_id = bank_specific_response_json.get("id")
+                acc_type_id = bank_specific_response_json.get("accountTypeId")
+        
 
                 data = json.dumps(
                     {
                         "accountBranchId": branch_id,
                         "accountNumber": account_number,
+                        "accountTypeId": acc_type_id,
                         "appliedKitta": qty,
                         "bankId": bank_id,
                         "boid": self.__dmat[-8:],
-                        "customerId": customer_id,
-                        "crnNumber": self.__crn,
                         "companyShareId": share_id,
+                        "crnNumber": self.__crn,
+                        "customerId": customer_id,
                         "demat": self.__dmat,
                         "transactionPIN": self.__pin,
                     }
@@ -312,12 +316,11 @@ class MeroShare:
 
             apply_req = sess.post(
                 "https://webbackend.cdsc.com.np/api/meroShare/applicantForm/share/apply",
-                data=data,
+                data=data, verify=cafile
             )
 
+            
             if apply_req.status_code != 201:
-                a = apply_req.json()
-                print(a)
                 self.status = f"Apply failed!"
                 logging.warning(self.status)
                 return 0
@@ -327,16 +330,13 @@ class MeroShare:
             return 0
 
 
-def application_list(sheet, full_list, client_type, Script, qty):
-
+def application_list(sheet, full_list, client_type, Scrip, qty):
     for details in sheet.iter_rows(min_row=2,
                                    min_col=1,
                                    values_only=True):
-
         if str(details[3]).upper() == 'NO':
             continue
-        
-        
+
         login_info = {"name": details[1],
                       "username": details[4].replace(" ", ""),
                       "password": details[6],
@@ -348,9 +348,9 @@ def application_list(sheet, full_list, client_type, Script, qty):
 
         ms = MeroShare(**login_info)
         ms.login()
-        ms.apply(Script, qty)
+        ms.apply(Scrip, qty)
 
-        data = [ms.client_id] + [details[1]] + [str(details[5]) + str(details[4].replace(" ", ""))] + [Script] + [
+        data = [ms.client_id] + [details[1]] + [str(details[5]) + str(details[4].replace(" ", ""))] + [Scrip] + [
             ms.status]
         full_list.loc[len(full_list)] = data
 
@@ -360,17 +360,15 @@ def application_list(sheet, full_list, client_type, Script, qty):
     return (full_list)
 
 
-def read_excel(Script, qty):
+def read_excel(Scrip, qty):
     full_list = pd.DataFrame(columns=['Client ID', 'Name', 'Demat', 'Script', 'Application'])
 
     book = load_workbook(filename='MeroShare Login Details.xlsx', data_only=True)
 
-    full_list = application_list(book['PMS List'], full_list, 'PMS ', Script, qty)
-    full_list = application_list(book['Investment'], full_list, 'Inv ', Script, qty)
-    full_list = application_list(book['Others'], full_list, 'Others ', Script, qty)
-
+    full_list = application_list(book['List'], full_list, '', Scrip, qty)
+    
     print(full_list)
-    full_list.to_excel(f'IPO Applied for {Script}.xlsx', index=False)
+    full_list.to_excel(f'IPO Applied for {Scrip}.xlsx', index=False)
 
 
 def start():
