@@ -7,20 +7,19 @@ from files import GetApplicableIssue
 
 
 def start():
-    print('MENU: \n')
-    print('1. Check Meroshare Account Status.')
-    print('2. Get My Shares List.')
-    print('3. Check Applicable Issue.')
-    print('4. Apply for Issue.')
-    print('5. Check Application Status.')
-    print('0. EXIT \n\n')
+    print("MENU: \n")
+    print("1. Check Meroshare Account Status.")
+    print("2. Get My Shares List.")
+    print("3. Check Applicable Issue.")
+    print("4. Apply for Issue.")
+    print("5. Check Application Status.")
+    print("0. EXIT \n\n")
 
-    key = input('Please Choose a Menu Option : ')
-    os.system('cls')
+    key = input("Please Choose a Menu Option : ")
+    os.system("cls")
 
-
-    if key not in ['0','1','2','3','4','5']:
-        print('INVALID INPUT\n')
+    if key not in ["0", "1", "2", "3", "4", "5"]:
+        print("INVALID INPUT\n")
         start()
 
     if int(key) == 0:
@@ -36,12 +35,9 @@ def start():
     elif int(key) == 5:
         IPO_Status.start()
 
-    os.system('cls')
-    start()
-
-if __name__ == '__main__':
+    os.system("cls")
     start()
 
 
-
-
+if __name__ == "__main__":
+    start()
